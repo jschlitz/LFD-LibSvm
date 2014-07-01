@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using libsvm;
+using System.IO;
 
 namespace LFD_LibSvm
 {
@@ -10,14 +12,16 @@ namespace LFD_LibSvm
   {
     static Random R = new Random();
     const int TRIALS = 100;
-    const int EXPERIMENTS = 100;
+    const int EXPERIMENTS = 1;
     const int THRESH = 100000000;
+    static readonly double sr10 = Math.Sqrt(10);
 
     static void Main(string[] args)
     {
       var wTarget = (new[] { 0.6, 0.8});
-      var C = 10;
-      var w0Target = 0.1;
+//      var C = 10.0;
+//      var gamma = 10.0;
+      var w0Target = 0.0; //I don't know how to make this have a bias. What.
       Datum[] classified = { };
       for (int experiment = 0; experiment < EXPERIMENTS; experiment++)
       {
@@ -25,6 +29,50 @@ namespace LFD_LibSvm
         {
           classified = Generate(TRIALS, w0Target, wTarget);
           var testData = Generate(TRIALS * 10, w0Target, wTarget);
+          var problem = new svm_problem
+          {
+            l = classified.Length,
+            x = classified.Select(d => d.x.Select((lf, i) => new svm_node 
+            {
+              index = i + 1, //I think that index may need to be 1-based?
+              value = lf 
+            }).ToArray()).ToArray(), 
+            y = classified.Select(d => d.y).ToArray(),
+          };
+
+
+          double goodC = 0.0;
+          double goodGamma = 0.0;
+          double goodAcc = 0.0;
+
+          for (double C = .01; C <= 1000000; C *= 10)
+          {
+            for (double gamma = .00001; gamma <= 101; gamma *= 10)
+            {
+              Console.WriteLine("------------------------------");
+              var machine = new C_SVC(problem, KernelHelper.RadialBasisFunctionKernel(gamma), C);
+              //machine.Train();
+              var acc = machine.GetCrossValidationAccuracy(5);
+              Console.WriteLine("c={0:f3} gamma={1:f3} for {2:f3}", C, gamma, acc);
+              if (acc > goodAcc)
+              {
+                goodC = C;
+                goodGamma = gamma;
+                goodAcc = acc;
+              }
+            }
+          }
+
+
+          Console.WriteLine("------------------------------");
+          Console.WriteLine("c={0:f3} gamma={1:f3} for {2:f3}", goodC, goodGamma, goodAcc);
+          var goodMachine = new C_SVC(problem, KernelHelper.RadialBasisFunctionKernel(goodGamma), goodC);
+          goodMachine.Train();
+          var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "LFD-Svm");
+          Directory.CreateDirectory(path);
+          path = Path.Combine(path, DateTime.Now.ToString("yyyyMMdd-HHmmss-")+experiment);
+          goodMachine.Export(path);
+          Console.ReadKey(true);
         }
         catch (Exception ex)
         {
