@@ -5,6 +5,7 @@ using System.Text;
 using System.Threading.Tasks;
 using libsvm;
 using System.IO;
+using System.Reflection;
 
 namespace LFD_LibSvm
 {
@@ -27,6 +28,13 @@ namespace LFD_LibSvm
 
     static void Main(string[] args)
     {
+      //read files
+      var pwd = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+      var train = ReadProblem(Path.Combine(pwd, "train.txt"));
+      var test = ReadProblem(Path.Combine(pwd, "test.txt"));
+      
+
+
       var wTarget = (new[] { 0.6, 0.8});
 //      var C = 10.0;
 //      var gamma = 10.0;
@@ -108,6 +116,26 @@ namespace LFD_LibSvm
         {
           Console.WriteLine(ex.Message);
         }
+      }
+    }
+
+    private static svm_problem ReadProblem(string theFile)
+    {
+      using (var sr = new StreamReader(theFile))
+      {
+        var fromFile = sr.ReadToEnd()
+          .Split('\n')
+          .Where(s=>!string.IsNullOrWhiteSpace(s))
+          .Select(s => s.Split('\t'))
+          .ToArray();
+        return new svm_problem
+        {
+          l = fromFile.Count(),
+          y = fromFile.Select(l => double.Parse(l.First())).ToArray(),
+          x = fromFile.Select(l => l.Skip(1)
+            .Select((a, i) => new svm_node { index = i + 1, value = double.Parse(a) }).ToArray())
+            .ToArray()
+        };
       }
     }
 
