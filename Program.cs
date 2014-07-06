@@ -26,96 +26,72 @@ namespace LFD_LibSvm
       var test = ReadFile(Path.Combine(pwd, "test.txt"));
 
 
-      var results = Enumerable.Range(0, 10)
-        .Select(n => VsAll(n + " vs. all", train, test, KernelHelper.PolynomialKernel(2, 1, 1), 0.01, lf => lf == (double)n ? 1.0 : -1.0))
-        .ToArray();//force.
+      //n vs all, 0..9
+      //var results = Enumerable.Range(0, 10)
+      //  .Select(n => VsAll(n + " vs. all", train, test, KernelHelper.PolynomialKernel(2, 1, 1), 0.01, lf => lf == (double)n ? 1.0 : -1.0))
+      //  .ToArray();//force.
 
-      foreach (var item in results)
+      //foreach (var item in results)
+      //{
+      //  Console.WriteLine(item);
+      //}
+      var ecvs = Enumerable.Range(-4, 5).ToDictionary(n=>n, _=>new List<double>());
+
+      var blah = new List<int>();
+      for (int i = -2; i <= 6; i += 2)
+        blah.Add(i);
+
+      var results1v5 = blah
+        .Select(d => NvsM("1 vs. 5, c=10^" + d, train,
+          test,
+          //KernelHelper.PolynomialKernel(2, 1, 1),
+          KernelHelper.RadialBasisFunctionKernel(1),
+          Math.Pow(10, d),
+          lf => lf == 1.0 || lf == 5.0,
+          lf => lf == (double)1 ? 1.0 : -1.0))
+        .ToArray();
+      foreach (var item in results1v5)
       {
         Console.WriteLine(item);
       }
+      
 
       Console.ReadKey(true);
 
 
-      //var wTarget = (new[] { 0.6, 0.8});
-      //var w0Target = 0.21; //I don't know how to make this have a bias. What.
-      //Datum[] classified = { };
-      //for (int experiment = 0; experiment < EXPERIMENTS; experiment++)
-      //{
-      //  try
-      //  {
-      //    classified = Generate(TRIALS, w0Target, wTarget);
+    }
 
-      //    var testData = Generate(TRIALS * 10, w0Target, wTarget);
-      //    var problem = new svm_problem
-      //    {
-      //      l = classified.Length,
-      //      x = classified.Select(DatumToNodes).ToArray(), 
-      //      y = classified.Select(d => d.y).ToArray(),
-      //    };
+    private static TrainInfo NvsM(string info, string[][] train, string[][] test, Kernel kernel, double c, Func<double, bool> filter, Func<double, double> convertY)
+    {
+      train = train.Where(sa => filter(double.Parse(sa[0]))).ToArray();
+      test = test.Where(sa => filter(double.Parse(sa[0]))).ToArray();
 
-
-      //    double goodC = 0.0;
-      //    double goodGamma = 0.0;
-      //    double goodAcc = 0.0;
-
-      //    for (int i = 0; i < 100; i++)
-      //    {
-      //      classified = Generate(TRIALS, w0Target, wTarget);
-      //      problem = new svm_problem
-      //      {
-      //        l = classified.Length,
-      //        x = classified.Select(DatumToNodes).ToArray(),
-      //        y = classified.Select(d => d.y).ToArray(),
-      //      };
-      //      var machine0 = new C_SVC(problem, KernelHelper.LinearKernel(), double.MaxValue);
-      //    }
-
-
-      //    for (double C = 1/64.0; C <= 32768; C *= 2)
-      //    {
-      //      Console.WriteLine("------------------------------");
-      //      var machine = new C_SVC(problem, KernelHelper.LinearKernel(), C);
-      //      //machine.Train();
-      //      var acc = machine.GetCrossValidationAccuracy(5);
-      //      var realAcc = ((double)testData.Where(d => machine.Predict(DatumToNodes(d)) == d.y).Count()) / ((double)testData.Length);
-      //      Console.WriteLine("c={0:f3} acc={1:f3} realAcc={2:f3}", C, acc, realAcc);
-      //      if (realAcc > goodAcc)
-      //      {
-      //        goodC = C;
-      //        goodAcc = realAcc;
-      //      }
-      //    }
-
-
-      //    Console.WriteLine("------------------------------");
-      //    Console.WriteLine("c={0:f3} gamma={1:f3} for {2:f3}", goodC, goodGamma, goodAcc);
-      //    //var goodMachine = new C_SVC(problem, KernelHelper.RadialBasisFunctionKernel(goodGamma), goodC);
-      //    var goodMachine = new C_SVC(problem, KernelHelper.LinearKernel(), goodC);
-      //    goodMachine.Train();
-      //    var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "LFD-Svm");
-      //    Directory.CreateDirectory(path);
-      //    path = Path.Combine(path, DateTime.Now.ToString("yyyyMMdd-HHmmss-")+experiment);
-      //    goodMachine.Export(path);
-      //    Console.ReadKey(true);
-      //  }
-      //  catch (Exception ex)
-      //  {
-      //    Console.WriteLine(ex.Message);
-      //  }
-      //}
+      return VsAll(info, train, test, kernel, c, convertY);
     }
 
     private static TrainInfo VsAll(string info, string[][] train, string[][] test, Kernel kernel, double c, Func<double, double> convertY)
     {
-      var trainProb = MakeProblem (train,convertY);
+      var trainProb = MakeProblem(train, convertY);
+      var testProb = MakeProblem(test, convertY);
       var machine = new C_SVC(trainProb, kernel, c);
-      var predictions = trainProb.x.Select(x => machine.Predict(x)).ToArray();
-      var wrong1 =predictions.Zip(trainProb.y, (pred, real) => pred * real)
+
+      return new TrainInfo
+      {
+        Info = info,
+        Eout = GetErr(testProb, machine),
+        Ein = GetErr(trainProb, machine),
+        cvAcc = machine.GetCrossValidationAccuracy(10),
+        Machine = machine
+      };
+    }
+
+    private static double GetErr(svm_problem problem, C_SVC machine)
+    {
+      var testPredict = problem.x.Select(x => machine.Predict(x)).ToArray();
+      var result = testPredict.Zip(problem.y, (pred, real) => pred * real)
         .Where(lf => lf < 0.0)
         .Count();
-      return new TrainInfo { Info = info, Ein = (double)wrong1 / (double)trainProb.l, Machine = machine };
+      return (double) result / (double) problem.l;
     }
 
     private class TrainInfo
@@ -123,9 +99,10 @@ namespace LFD_LibSvm
       public string Info;
       public double Ein;
       public double Eout;
+      public double cvAcc;
       public override string ToString()
       {
-        return string.Format("{0} Ein={1:f3} Eout={2:f3}", Info, Ein, Eout);
+        return string.Format("{0} Ein={1:f3} Eout={2:f3} cvAcc={3:f3}", Info, Ein, Eout, cvAcc);
       }
       public C_SVC Machine;
       public void ExportMachine(string name)
